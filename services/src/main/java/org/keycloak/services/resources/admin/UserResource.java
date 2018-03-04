@@ -34,23 +34,8 @@ import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
-import org.keycloak.models.AuthenticatedClientSessionModel;
-import org.keycloak.models.ClientModel;
-import org.keycloak.models.Constants;
-import org.keycloak.models.FederatedIdentityModel;
-import org.keycloak.models.GroupModel;
-import org.keycloak.models.IdentityProviderModel;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.ModelDuplicateException;
-import org.keycloak.models.ModelException;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserConsentModel;
-import org.keycloak.models.UserCredentialModel;
-import org.keycloak.models.UserLoginFailureModel;
-import org.keycloak.models.UserManager;
-import org.keycloak.models.UserModel;
-import org.keycloak.models.UserSessionModel;
-import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.models.*;
+import org.keycloak.models.ImpersonationConstants.SessionNote;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.utils.RedirectUtils;
@@ -282,6 +267,12 @@ public class UserResource {
         EventBuilder event = new EventBuilder(realm, session, clientConnection);
 
         UserSessionModel userSession = session.sessions().createUserSession(realm, user, user.getUsername(), clientConnection.getRemoteAddr(), "impersonate", false, null, null);
+
+        String impersonatorId = auth.adminAuth().getUser().getId();
+        String impersonator = auth.adminAuth().getUser().getUsername();
+        userSession.setNote(SessionNote.IMPERSONATOR_ID.toString(), impersonatorId);
+        userSession.setNote(SessionNote.IMPERSONATOR_USERNAME.toString(), impersonator);
+
         AuthenticationManager.createLoginCookie(session, realm, userSession.getUser(), userSession, uriInfo, clientConnection);
         URI redirect = AccountFormService.accountServiceApplicationPage(uriInfo).build(realm.getName());
         Map<String, Object> result = new HashMap<>();
@@ -291,7 +282,7 @@ public class UserResource {
              .session(userSession)
              .user(user)
              .detail(Details.IMPERSONATOR_REALM,authenticatedRealm.getName())
-             .detail(Details.IMPERSONATOR, auth.adminAuth().getUser().getUsername()).success();
+             .detail(Details.IMPERSONATOR, impersonator).success();
 
         return result;
     }

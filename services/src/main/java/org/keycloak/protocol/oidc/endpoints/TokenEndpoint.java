@@ -24,14 +24,7 @@ import org.jboss.resteasy.spi.ResteasyProviderFactory;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.authentication.AuthenticationProcessor;
-import org.keycloak.authentication.authenticators.broker.AbstractIdpAuthenticator;
-import org.keycloak.authentication.authenticators.broker.util.SerializedBrokeredIdentityContext;
-import org.keycloak.broker.provider.BrokeredIdentityContext;
-import org.keycloak.broker.provider.ExchangeExternalToken;
-import org.keycloak.broker.provider.IdentityProvider;
-import org.keycloak.broker.provider.ExchangeTokenToIdentityProviderToken;
-import org.keycloak.broker.provider.IdentityProviderFactory;
-import org.keycloak.broker.provider.IdentityProviderMapper;
+import org.keycloak.broker.provider.*;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.common.Profile;
 import org.keycloak.common.constants.ServiceAccountConstants;
@@ -44,40 +37,20 @@ import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.jose.jws.JWSInputException;
-import org.keycloak.models.AuthenticationFlowModel;
-import org.keycloak.models.AuthenticatedClientSessionModel;
-import org.keycloak.models.ClientModel;
-import org.keycloak.models.Constants;
-import org.keycloak.models.FederatedIdentityModel;
-import org.keycloak.models.IdentityProviderMapperModel;
-import org.keycloak.models.IdentityProviderModel;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
-import org.keycloak.models.UserSessionModel;
-import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.models.*;
+import org.keycloak.models.ImpersonationConstants.SessionNote;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.TokenManager;
 import org.keycloak.protocol.oidc.utils.AuthorizeClientUtil;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.AccessTokenResponse;
 import org.keycloak.representations.JsonWebToken;
-import org.keycloak.services.ErrorPage;
 import org.keycloak.services.CorsErrorResponseException;
-import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.Urls;
-import org.keycloak.services.managers.AuthenticationManager;
-import org.keycloak.services.managers.AuthenticationSessionManager;
-import org.keycloak.services.managers.BruteForceProtector;
-import org.keycloak.services.managers.ClientManager;
-import org.keycloak.services.managers.ClientSessionCode;
-import org.keycloak.services.managers.RealmManager;
-import org.keycloak.services.messages.Messages;
+import org.keycloak.services.managers.*;
 import org.keycloak.services.resources.Cors;
 import org.keycloak.services.resources.IdentityBrokerService;
-import org.keycloak.services.resources.LoginActionsService;
 import org.keycloak.services.resources.admin.AdminAuth;
 import org.keycloak.services.resources.admin.permissions.AdminPermissions;
 import org.keycloak.services.validation.Validation;
@@ -89,20 +62,13 @@ import org.keycloak.utils.ProfileHelper;
 import javax.ws.rs.OPTIONS;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
-import java.net.URI;
-import java.util.List;
+import javax.ws.rs.core.*;
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.security.MessageDigest;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -706,12 +672,20 @@ public class TokenEndpoint {
                 }
             }
 
-            tokenUser = requestedUser;
             tokenSession = session.sessions().createUserSession(realm, requestedUser, requestedUser.getUsername(), clientConnection.getRemoteAddr(), "impersonate", false, null, null);
+            if (tokenUser != null) {
+                tokenSession.setNote(SessionNote.IMPERSONATOR_ID.toString(), tokenUser.getId());
+                tokenSession.setNote(SessionNote.IMPERSONATOR_USERNAME.toString(), tokenUser.getUsername());
+                if (tokenUser.getAttributes().containsKey(IdentityProvider.REMOTE_ID)) {
+                    tokenSession.setNote(SessionNote.IMPERSONATOR_REMOTE_ID.toString(), tokenUser.getFirstAttribute(IdentityProvider.REMOTE_ID));
+                    tokenSession.setNote(SessionNote.IMPERSONATOR_REMOTE_USERNAME.toString(), tokenUser.getFirstAttribute(IdentityProvider.REMOTE_USERNAME));
+                }
+            }
+
+            tokenUser = requestedUser;
         }
 
         String requestedIssuer = formParams.getFirst(OAuth2Constants.REQUESTED_ISSUER);
-
         if (requestedIssuer == null) {
             return exchangeClientToClient(tokenUser, tokenSession);
         } else {
@@ -729,7 +703,7 @@ public class TokenEndpoint {
          }
     }
 
-    public Response exchangeToIdentityProvider(UserModel targetUser, UserSessionModel targetUserSession, String requestedIssuer) {
+    private Response exchangeToIdentityProvider(UserModel targetUser, UserSessionModel targetUserSession, String requestedIssuer) {
         event.detail(Details.REQUESTED_ISSUER, requestedIssuer);
         IdentityProviderModel providerModel = realm.getIdentityProviderByAlias(requestedIssuer);
         if (providerModel == null) {
@@ -769,6 +743,8 @@ public class TokenEndpoint {
         if (audience != null) {
             targetClient = realm.getClientByClientId(audience);
         }
+
+        // NPE if client doesn't exist.
 
         if (targetClient.isConsentRequired()) {
             event.detail(Details.REASON, "audience requires consent");
@@ -864,8 +840,6 @@ public class TokenEndpoint {
         userSession.setNote(IdentityProvider.FEDERATED_ACCESS_TOKEN, subjectToken);
 
         return exchangeClientToClient(user, userSession);
-
-
     }
 
     protected UserModel importUserFromExternalIdentity(BrokeredIdentityContext context) {
@@ -929,6 +903,8 @@ public class TokenEndpoint {
             user.setEmail(context.getEmail());
             user.setFirstName(context.getFirstName());
             user.setLastName(context.getLastName());
+            user.setSingleAttribute(IdentityProvider.REMOTE_USERNAME, context.getUsername());
+            user.setSingleAttribute(IdentityProvider.REMOTE_ID, context.getBrokerUserId());
 
 
             federatedIdentityModel = new FederatedIdentityModel(context.getIdpConfig().getAlias(), context.getId(),
