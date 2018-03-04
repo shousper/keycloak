@@ -27,6 +27,12 @@ import org.keycloak.models.utils.KeycloakModelUtils;
 public class ImpersonationConstants {
     public static String IMPERSONATION_ROLE = "impersonation";
 
+    public enum SessionNote {
+        IMPERSONATOR_ID,
+        IMPERSONATOR_USERNAME,
+        IMPERSONATOR_REMOTE_ID,
+        IMPERSONATOR_REMOTE_USERNAME,
+    }
 
     public static void setupMasterRealmRole(RealmProvider model, RealmModel realm) {
         RealmModel adminRealm;

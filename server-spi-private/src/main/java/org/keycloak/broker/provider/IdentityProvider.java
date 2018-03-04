@@ -37,6 +37,9 @@ public interface IdentityProvider<C extends IdentityProviderModel> extends Provi
     String EXTERNAL_IDENTITY_PROVIDER = "EXTERNAL_IDENTITY_PROVIDER";
     String FEDERATED_ACCESS_TOKEN = "FEDERATED_ACCESS_TOKEN";
 
+    String REMOTE_USERNAME = "remote_username";
+    String REMOTE_ID = "remote_id";
+
     interface AuthenticationCallback {
         /**
          * This method should be called by provider after the JAXRS callback endpoint has finished authentication
